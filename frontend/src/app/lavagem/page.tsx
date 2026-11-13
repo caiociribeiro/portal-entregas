@@ -71,7 +71,12 @@ export default function WashingPage() {
       .sort((a, b) => a.time.localeCompare(b.time));
   }, [deliveries, catalog, users, date, search]);
 
-  const selectedDeliveries = dayDeliveries.filter((delivery) => selectedIds.includes(delivery.id));
+  const selectedDeliveries = deliveries
+    .filter((delivery) =>
+      selectedIds.includes(delivery.id) &&
+      !["CANCELADO", "ENTREGUE"].includes(delivery.status)
+    )
+    .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
 
   function getModelName(modelId: string) {
     const model = catalog.find((item) => item.id === modelId);
@@ -117,7 +122,7 @@ export default function WashingPage() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
           <div>
             <label className="mb-1.5 block text-xs font-medium text-gray-600">Data das entregas</label>
-            <input type="date" value={date} onChange={(event) => { setDate(event.target.value); setSelectedIds([]); }} className="h-10 rounded-md border border-gray-200 px-3 text-sm" />
+            <input type="date" value={date} onChange={(event) => setDate(event.target.value)} className="h-10 rounded-md border border-gray-200 px-3 text-sm" />
           </div>
           <div className="relative flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
@@ -171,12 +176,13 @@ export default function WashingPage() {
       <section className="print-only">
         <div className="mb-6 border-b border-black pb-4">
           <h1 className="text-xl font-bold">RELATÓRIO DE LAVAGENS</h1>
-          <p className="mt-1 text-sm">Data das entregas: {formatDate(date)}</p>
+          <p className="mt-1 text-sm">Datas das entregas: {Array.from(new Set(selectedDeliveries.map((delivery) => delivery.date))).sort().map(formatDate).join(", ")}</p>
           <p className="text-sm">Veículos selecionados: {selectedDeliveries.length}</p>
         </div>
         <table className="w-full border-collapse text-left">
           <thead>
             <tr>
+              <th className="border border-black p-2 text-sm">Data</th>
               <th className="border border-black p-2 text-sm">Horário</th>
               <th className="border border-black p-2 text-sm">Modelo</th>
               <th className="border border-black p-2 text-sm">Chassi</th>
@@ -187,6 +193,7 @@ export default function WashingPage() {
           <tbody>
             {selectedDeliveries.map((delivery) => (
               <tr key={delivery.id}>
+                <td className="border border-black p-2 text-sm">{formatDate(delivery.date)}</td>
                 <td className="border border-black p-2 text-sm">{delivery.time}</td>
                 <td className="border border-black p-2 text-sm">{getModelName(delivery.modelId)}</td>
                 <td className="border border-black p-2 text-sm">{delivery.chassis ? `••••••${delivery.chassis.slice(-6)}` : "Não informado"}</td>
