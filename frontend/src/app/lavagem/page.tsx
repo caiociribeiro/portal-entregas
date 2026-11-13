@@ -75,7 +75,7 @@ export default function WashingPage() {
 
   function getModelName(modelId: string) {
     const model = catalog.find((item) => item.id === modelId);
-    return model ? [model.manufacturer, model.name, model.version].filter(Boolean).join(" ") : "Modelo não informado";
+    return model?.name ?? "Modelo não informado";
   }
 
   function getConsultantName(userId: string) {
