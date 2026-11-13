@@ -568,9 +568,7 @@ export default function CalendarPage() {
 
     if (!model) return 'Modelo não informado';
 
-    return [model.manufacturer, model.name, model.version]
-      .filter(Boolean)
-      .join(' ');
+    return model.name;
   }
 
 

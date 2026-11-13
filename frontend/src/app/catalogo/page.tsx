@@ -378,17 +378,6 @@ export default function CatalogPage() {
                     Nome
                   </th>
 
-                  {activeCategory === 'vehicles' && (
-                    <>
-                      <th className="px-5 py-4 text-xs font-semibold text-gray-500">
-                        Fabricante
-                      </th>
-                      <th className="px-5 py-4 text-xs font-semibold text-gray-500">
-                        Versão
-                      </th>
-                    </>
-                  )}
-
                   <th className="px-5 py-4 text-xs font-semibold text-gray-500">
                     Descrição
                   </th>
@@ -414,17 +403,6 @@ export default function CatalogPage() {
                         {item.name}
                       </p>
                     </td>
-
-                    {activeCategory === 'vehicles' && (
-                      <>
-                        <td className="px-5 py-4 text-sm text-gray-600">
-                          {item.manufacturer || '—'}
-                        </td>
-                        <td className="px-5 py-4 text-sm text-gray-600">
-                          {item.version || '—'}
-                        </td>
-                      </>
-                    )}
 
                     <td className="max-w-[250px] px-5 py-4 text-sm text-gray-500">
                       <span className="line-clamp-2">
