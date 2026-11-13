@@ -6,7 +6,6 @@ import { usePathname } from 'next/navigation';
 import {
   LayoutDashboard,
   CalendarDays,
-  CarFront,
   ClipboardList,
   Users,
   Package,
@@ -32,7 +31,6 @@ const navigation = [
   {
     title: 'OPERAÇÃO',
     items: [
-      { label: 'Preparação de veículos', href: '/preparacao', icon: CarFront },
       {
         label: 'Programação de lavagem',
         href: '/lavagem',

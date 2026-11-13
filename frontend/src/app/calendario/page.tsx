@@ -10,7 +10,6 @@ import {
   Search,
   Pencil,
   X,
-  CarFront,
   MapPin,
   UserRound,
   CheckCircle2,
@@ -48,6 +47,14 @@ interface User {
   active: boolean;
 }
 
+interface DeliveryItem {
+  id: string;
+  name: string;
+  category: 'accessories' | 'services' | 'custom';
+  courtesy: boolean;
+  applied: boolean;
+}
+
 interface Appointment {
   id: string;
   date: string;
@@ -68,9 +75,7 @@ interface Appointment {
   salesConsultantId: string;
   aestheticsConsultantId: string;
   responsibleId: string;
-  courtesy: string;
-  accessoryIds: string[];
-  serviceIds: string[];
+  items: DeliveryItem[];
   notes: string;
   createdAt: string;
 }
@@ -106,6 +111,8 @@ const statuses: {
   },
 ];
 
+const deliveryTimes = ['09:00', '10:00', '11:00', '14:00', '15:00', '16:00', '17:00'];
+
 const locations = [
   'Na loja de origem',
   'Em trânsito',
@@ -134,9 +141,9 @@ const emptyForm = {
   salesConsultantId: '',
   aestheticsConsultantId: '',
   responsibleId: '',
-  courtesy: '',
-  accessoryIds: [] as string[],
-  serviceIds: [] as string[],
+  items: [] as DeliveryItem[],
+  newItemId: '',
+  newItemCourtesy: false,
   notes: '',
 };
 
@@ -173,6 +180,16 @@ function getStatusClass(status: DeliveryStatus) {
   );
 }
 
+function catalogItemNameFromStorage(storedCatalog: string | null, id: string) {
+  if (!storedCatalog) return 'Item do catálogo';
+  try {
+    const items = JSON.parse(storedCatalog) as CatalogItem[];
+    return items.find((item) => item.id === id)?.name ?? 'Item do catálogo';
+  } catch {
+    return 'Item do catálogo';
+  }
+}
+
 export default function CalendarPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
@@ -199,7 +216,42 @@ export default function CalendarPage() {
       const storedUsers = localStorage.getItem(USERS_KEY);
 
       if (storedAppointments) {
-        setAppointments(JSON.parse(storedAppointments));
+        const parsedAppointments = JSON.parse(storedAppointments) as (Appointment & {
+          accessoryIds?: string[];
+          serviceIds?: string[];
+          courtesy?: string;
+          items?: DeliveryItem[];
+        })[];
+        setAppointments(
+          parsedAppointments.map((appointment) => ({
+            ...appointment,
+            items: appointment.items ?? [
+              ...(appointment.accessoryIds ?? []).map((id) => ({
+                id: `legacy-${id}`,
+                name: catalogItemNameFromStorage(storedCatalog, id),
+                category: 'accessories' as const,
+                courtesy: false,
+                applied: false,
+              })),
+              ...(appointment.serviceIds ?? []).map((id) => ({
+                id: `legacy-${id}`,
+                name: catalogItemNameFromStorage(storedCatalog, id),
+                category: 'services' as const,
+                courtesy: false,
+                applied: false,
+              })),
+              ...(appointment.courtesy?.trim()
+                ? [{
+                    id: `legacy-courtesy-${appointment.id}`,
+                    name: appointment.courtesy.trim(),
+                    category: 'custom' as const,
+                    courtesy: true,
+                    applied: false,
+                  }]
+                : []),
+            ],
+          })),
+        );
       }
 
       if (storedCatalog) {
@@ -327,9 +379,9 @@ export default function CalendarPage() {
       salesConsultantId: appointment.salesConsultantId,
       aestheticsConsultantId: appointment.aestheticsConsultantId,
       responsibleId: appointment.responsibleId,
-      courtesy: appointment.courtesy,
-      accessoryIds: [...appointment.accessoryIds],
-      serviceIds: [...appointment.serviceIds],
+      items: [...(appointment.items ?? [])],
+      newItemId: '',
+      newItemCourtesy: false,
       notes: appointment.notes,
     });
 
@@ -345,12 +397,60 @@ export default function CalendarPage() {
     setError('');
   }
 
-  function toggleItem(id: string, field: 'accessoryIds' | 'serviceIds') {
+  function addDeliveryItem() {
+    if (!form.newItemId) return;
+    const catalogItem = catalog.find((item) => item.id === form.newItemId);
+    if (!catalogItem) return;
+
     setForm((current) => ({
       ...current,
-      [field]: current[field].includes(id)
-        ? current[field].filter((item) => item !== id)
-        : [...current[field], id],
+      items: [
+        ...current.items,
+        {
+          id: crypto.randomUUID(),
+          name: catalogItem.name,
+          category: catalogItem.category as 'accessories' | 'services',
+          courtesy: current.newItemCourtesy,
+          applied: false,
+        },
+      ],
+      newItemId: '',
+      newItemCourtesy: false,
+    }));
+  }
+
+  function addCustomItem() {
+    const name = window.prompt('Descreva o acessório ou serviço:')?.trim();
+    if (!name) return;
+    setForm((current) => ({
+      ...current,
+      items: [
+        ...current.items,
+        {
+          id: crypto.randomUUID(),
+          name,
+          category: 'custom',
+          courtesy: current.newItemCourtesy,
+          applied: false,
+        },
+      ],
+      newItemCourtesy: false,
+    }));
+  }
+
+  function updateDeliveryItem(id: string, changes: Partial<DeliveryItem>) {
+    setForm((current) => ({
+      ...current,
+      items: current.items.map((item) =>
+        item.id === id ? { ...item, ...changes } : item,
+      ),
+    }));
+  }
+
+  function removeDeliveryItem(id: string) {
+    setForm((current) => ({
+      ...current,
+      items: current.items.filter((item) => item.id !== id),
     }));
   }
 
@@ -359,6 +459,23 @@ export default function CalendarPage() {
 
     if (!form.date || !form.time || !form.customer.trim() || !form.modelId) {
       setError('Preencha cliente, modelo, data e horário.');
+      return;
+    }
+
+    if (!deliveryTimes.includes(form.time)) {
+      setError('Selecione um dos horários disponíveis: 09h às 11h ou 14h às 17h.');
+      return;
+    }
+
+    const occupiedSlot = appointments.find(
+      (appointment) =>
+        appointment.date === form.date &&
+        appointment.time === form.time &&
+        appointment.id !== editingId &&
+        appointment.status !== 'CANCELADO',
+    );
+    if (occupiedSlot) {
+      setError('Este horário já possui uma entrega agendada. Selecione outro horário.');
       return;
     }
 
@@ -455,12 +572,7 @@ export default function CalendarPage() {
       .join(' ');
   }
 
-  function getItemNames(ids: string[]) {
-    return ids
-      .map((id) => catalog.find((item) => item.id === id)?.name)
-      .filter(Boolean)
-      .join(', ');
-  }
+
 
   const today = selectedDate;
 
@@ -773,6 +885,26 @@ export default function CalendarPage() {
                       <Wrench size={12} />
                       Revisão
                     </span>
+
+                    {(['accessories', 'services'] as const).map((category) => {
+                      const categoryItems = (appointment.items ?? []).filter(
+                        (item) => item.category === category,
+                      );
+                      const allApplied = categoryItems.length > 0 && categoryItems.every((item) => item.applied);
+                      return (
+                        <span
+                          key={category}
+                          className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] ${
+                            categoryItems.length === 0 || allApplied
+                              ? 'bg-green-50 text-green-700'
+                              : 'bg-amber-50 text-amber-700'
+                          }`}
+                        >
+                          <CheckCircle2 size={12} />
+                          {category === 'accessories' ? 'Acessórios' : 'Serviços'}: {categoryItems.length === 0 ? 'N/A' : allApplied ? 'OK' : 'Pendente'}
+                        </span>
+                      );
+                    })}
                   </div>
                 </button>
 
@@ -885,15 +1017,29 @@ export default function CalendarPage() {
                       <label className="mb-1.5 block text-xs font-medium text-gray-600">
                         Horário *
                       </label>
-                      <input
+                      <select
                         required
-                        type="time"
                         value={form.time}
                         onChange={(event) =>
                           setForm({ ...form, time: event.target.value })
                         }
                         className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm outline-none focus:border-gray-500"
-                      />
+                      >
+                        {deliveryTimes.map((time) => {
+                          const occupied = appointments.some(
+                            (appointment) =>
+                              appointment.date === form.date &&
+                              appointment.time === time &&
+                              appointment.id !== editingId &&
+                              appointment.status !== 'CANCELADO',
+                          );
+                          return (
+                            <option key={time} value={time} disabled={occupied}>
+                              {time}{occupied ? ' — ocupado' : ''}
+                            </option>
+                          );
+                        })}
+                      </select>
                     </div>
 
                     <div>
@@ -1184,95 +1330,118 @@ export default function CalendarPage() {
 
                 <div className="border-t border-gray-100" />
 
-                {/* Itens contratados */}
+                {/* Acessórios e serviços */}
                 <section>
                   <h3 className="mb-1 text-sm font-semibold text-gray-900">
-                    Acessórios e estética
+                    Acessórios e serviços
                   </h3>
                   <p className="mb-4 text-xs text-gray-500">
-                    Selecione os itens contratados para esta entrega.
+                    Adicione cada item individualmente e marque se é cortesia.
+                    Depois, acompanhe se foi aplicado.
                   </p>
 
-                  <div className="grid gap-5 sm:grid-cols-2">
-                    <div>
-                      <p className="mb-2 text-xs font-medium text-gray-600">
-                        Acessórios
-                      </p>
-
-                      {accessories.length === 0 ? (
-                        <p className="text-xs text-gray-400">
-                          Nenhum acessório cadastrado.
-                        </p>
-                      ) : (
-                        <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border border-gray-200 p-3">
-                          {accessories.map((item) => (
-                            <label
-                              key={item.id}
-                              className="flex cursor-pointer items-center gap-2 text-sm text-gray-700"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={form.accessoryIds.includes(item.id)}
-                                onChange={() =>
-                                  toggleItem(item.id, 'accessoryIds')
-                                }
-                                className="h-4 w-4 accent-black"
-                              />
-                              {item.name}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-
-                    <div>
-                      <p className="mb-2 text-xs font-medium text-gray-600">
-                        Serviços de estética
-                      </p>
-
-                      {services.length === 0 ? (
-                        <p className="text-xs text-gray-400">
-                          Nenhum serviço cadastrado.
-                        </p>
-                      ) : (
-                        <div className="max-h-40 space-y-2 overflow-y-auto rounded-md border border-gray-200 p-3">
-                          {services.map((item) => (
-                            <label
-                              key={item.id}
-                              className="flex cursor-pointer items-center gap-2 text-sm text-gray-700"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={form.serviceIds.includes(item.id)}
-                                onChange={() =>
-                                  toggleItem(item.id, 'serviceIds')
-                                }
-                                className="h-4 w-4 accent-black"
-                              />
-                              {item.name}
-                            </label>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-4">
-                    <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                      Cortesias
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={form.courtesy}
+                  <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+                    <select
+                      value={form.newItemId}
                       onChange={(event) =>
-                        setForm({ ...form, courtesy: event.target.value })
+                        setForm({ ...form, newItemId: event.target.value })
                       }
-                      placeholder="Descreva as cortesias oferecidas..."
-                      className="w-full resize-none rounded-md border border-gray-200 px-3 py-2.5 text-sm outline-none focus:border-gray-500"
-                    />
-                  </div>
-                </section>
+                      className="h-10 rounded-md border border-gray-200 bg-white px-3 text-sm"
+                    >
+                      <option value="">Selecione um acessório ou serviço</option>
+                      {[...accessories, ...services].map((item) => (
+                        <option key={item.id} value={item.id}>
+                          {item.category === 'accessories' ? 'Acessório' : 'Serviço'} — {item.name}
+                        </option>
+                      ))}
+                    </select>
 
+                    <label className="flex items-center gap-2 text-xs text-gray-600">
+                      <input
+                        type="checkbox"
+                        checked={form.newItemCourtesy}
+                        onChange={(event) =>
+                          setForm({ ...form, newItemCourtesy: event.target.checked })
+                        }
+                        className="h-4 w-4 accent-black"
+                      />
+                      Cortesia
+                    </label>
+
+                    <button
+                      type="button"
+                      onClick={addDeliveryItem}
+                      disabled={!form.newItemId}
+                      className="flex h-10 items-center justify-center gap-2 rounded-md bg-[#151515] px-3 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Plus size={14} />
+                      Adicionar
+                    </button>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={addCustomItem}
+                    className="mt-3 text-xs font-medium text-gray-600 underline underline-offset-2"
+                  >
+                    Adicionar item personalizado
+                  </button>
+
+                  {form.items.length === 0 ? (
+                    <p className="mt-4 rounded-md border border-dashed border-gray-200 px-3 py-5 text-center text-xs text-gray-400">
+                      Nenhum acessório ou serviço adicionado.
+                    </p>
+                  ) : (
+                    <div className="mt-4 space-y-2">
+                      {form.items.map((item) => (
+                        <div
+                          key={item.id}
+                          className="flex flex-col gap-3 rounded-md border border-gray-200 p-3 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-gray-800">{item.name}</p>
+                            <p className="mt-1 text-[11px] text-gray-500">
+                              {item.category === 'accessories' ? 'Acessório' : item.category === 'services' ? 'Serviço' : 'Personalizado'}
+                              {item.courtesy ? ' · Cortesia' : ' · Contratado'}
+                            </p>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3">
+                            <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                              <input
+                                type="checkbox"
+                                checked={item.applied}
+                                onChange={(event) =>
+                                  updateDeliveryItem(item.id, { applied: event.target.checked })
+                                }
+                                className="h-4 w-4 accent-black"
+                              />
+                              Aplicado
+                            </label>
+                            <label className="flex items-center gap-1.5 text-xs text-gray-600">
+                              <input
+                                type="checkbox"
+                                checked={item.courtesy}
+                                onChange={(event) =>
+                                  updateDeliveryItem(item.id, { courtesy: event.target.checked })
+                                }
+                                className="h-4 w-4 accent-black"
+                              />
+                              Cortesia
+                            </label>
+                            <button
+                              type="button"
+                              onClick={() => removeDeliveryItem(item.id)}
+                              className="rounded p-1 text-gray-400 hover:bg-red-50 hover:text-red-600"
+                              aria-label={`Remover ${item.name}`}
+                            >
+                              <X size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </section>
                 <div className="border-t border-gray-100" />
 
                 {/* Observações */}
@@ -1421,31 +1590,28 @@ export default function CalendarPage() {
 
               <div className="border-t border-gray-100 pt-5">
                 <h3 className="mb-3 text-sm font-semibold text-gray-800">
-                  Itens contratados
+                  Acessórios e serviços
                 </h3>
-
-                <div className="space-y-3 text-sm text-gray-600">
-                  <p>
-                    <strong className="font-medium text-gray-800">
-                      Acessórios:
-                    </strong>{' '}
-                    {getItemNames(selectedAppointment.accessoryIds) || 'Nenhum'}
-                  </p>
-
-                  <p>
-                    <strong className="font-medium text-gray-800">
-                      Estética:
-                    </strong>{' '}
-                    {getItemNames(selectedAppointment.serviceIds) || 'Nenhum'}
-                  </p>
-
-                  <p>
-                    <strong className="font-medium text-gray-800">
-                      Cortesias:
-                    </strong>{' '}
-                    {selectedAppointment.courtesy || 'Nenhuma'}
-                  </p>
-                </div>
+                {(selectedAppointment.items ?? []).length === 0 ? (
+                  <p className="text-sm text-gray-500">Nenhum item cadastrado.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {(selectedAppointment.items ?? []).map((item) => (
+                      <div key={item.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-gray-100 px-3 py-2">
+                        <div>
+                          <p className="text-sm font-medium text-gray-800">{item.name}</p>
+                          <p className="text-xs text-gray-500">
+                            {item.category === 'accessories' ? 'Acessório' : item.category === 'services' ? 'Serviço' : 'Personalizado'}
+                            {item.courtesy ? ' · Cortesia' : ''}
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-2.5 py-1 text-[11px] font-medium ${item.applied ? 'bg-green-50 text-green-700' : 'bg-amber-50 text-amber-700'}`}>
+                          {item.applied ? 'Aplicado' : 'Pendente'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
 
               {selectedAppointment.notes && (
