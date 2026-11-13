@@ -214,6 +214,8 @@ export default function CalendarPage() {
     useState<Appointment | null>(null);
 
   const [form, setForm] = useState(emptyForm);
+  const [vehicleSearch, setVehicleSearch] = useState('');
+  const [showVehicleResults, setShowVehicleResults] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -468,9 +470,12 @@ export default function CalendarPage() {
     const vehicle = stockVehicles.find((item) => item.id === vehicleId);
     if (!vehicle) {
       setForm((current) => ({ ...current, vehicleId: '', modelId: '', color: '', chassis: '' }));
+      setVehicleSearch('');
       return;
     }
     setForm((current) => ({ ...current, vehicleId, modelId: vehicle.modelId, color: vehicle.color, chassis: vehicle.chassis, location: vehicle.location }));
+    setVehicleSearch(`${getModelName(vehicle.modelId)} — ${vehicle.color} — ••••••${vehicle.chassis.slice(-6)}`);
+    setShowVehicleResults(false);
   }
 
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
@@ -1086,12 +1091,51 @@ export default function CalendarPage() {
                   </h3>
 
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="sm:col-span-2 lg:col-span-3">
-                      <label className="mb-1.5 block text-xs font-medium text-gray-600">Veículo do estoque *</label>
-                      <select required value={form.vehicleId} onChange={(event) => selectStockVehicle(event.target.value)} className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500">
-                        <option value="">Selecione um veículo cadastrado</option>
-                        {stockVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{getModelName(vehicle.modelId)} — {vehicle.color} — ••••••{vehicle.chassis.slice(-6)} ({vehicle.inStore ? 'Na loja' : 'Fora da loja'})</option>)}
-                      </select>
+                    <div className="relative sm:col-span-2 lg:col-span-3">
+                      <label htmlFor="stock-vehicle-search" className="mb-1.5 block text-xs font-medium text-gray-600">Pesquisar veículo por modelo ou chassi *</label>
+                      <input
+                        id="stock-vehicle-search"
+                        type="search"
+                        autoComplete="off"
+                        value={vehicleSearch}
+                        onFocus={() => setShowVehicleResults(true)}
+                        onChange={(event) => {
+                          const value = event.target.value;
+                          setVehicleSearch(value);
+                          setShowVehicleResults(true);
+                          if (form.vehicleId) {
+                            setForm((current) => ({ ...current, vehicleId: '', modelId: '', color: '', chassis: '' }));
+                          }
+                        }}
+                        placeholder="Digite o modelo, cor ou chassi (completo ou últimos 6 dígitos)"
+                        className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500"
+                        required={!form.vehicleId}
+                      />
+                      {showVehicleResults && vehicleSearch !== (form.vehicleId ? `${getModelName(form.modelId)} — ${form.color} — ••••••${form.chassis.slice(-6)}` : '') && (
+                        <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                          {stockVehicles.filter((vehicle) => {
+                            const query = vehicleSearch.trim().toLocaleLowerCase();
+                            const chassis = vehicle.chassis.toLocaleLowerCase();
+                            const model = getModelName(vehicle.modelId).toLocaleLowerCase();
+                            return !query || model.includes(query) || vehicle.color.toLocaleLowerCase().includes(query) || chassis.includes(query) || chassis.slice(-6).includes(query.replace(/[^a-z0-9]/g, ''));
+                          }).map((vehicle) => (
+                            <button
+                              key={vehicle.id}
+                              type="button"
+                              onClick={() => selectStockVehicle(vehicle.id)}
+                              className="flex w-full flex-col gap-1 border-b border-gray-100 px-3 py-2.5 text-left last:border-0 hover:bg-gray-50"
+                            >
+                              <span className="text-sm font-medium text-gray-900">{getModelName(vehicle.modelId)} — {vehicle.color}</span>
+                              <span className="text-xs text-gray-500">Chassi ••••••{vehicle.chassis.slice(-6)} · {vehicle.inStore ? 'Na loja' : 'Fora da loja'}</span>
+                            </button>
+                          ))}
+                          {stockVehicles.filter((vehicle) => {
+                            const query = vehicleSearch.trim().toLocaleLowerCase();
+                            const chassis = vehicle.chassis.toLocaleLowerCase();
+                            return !query || getModelName(vehicle.modelId).toLocaleLowerCase().includes(query) || vehicle.color.toLocaleLowerCase().includes(query) || chassis.includes(query) || chassis.slice(-6).includes(query.replace(/[^a-z0-9]/g, ''));
+                          }).length === 0 && <p className="px-3 py-3 text-sm text-gray-500">Nenhum veículo encontrado.</p>}
+                        </div>
+                      )}
                       {stockVehicles.length === 0 && <p className="mt-1.5 text-xs text-amber-700">Cadastre primeiro os veículos na página Estoque.</p>}
                     </div>
                     {form.vehicleId && <div className="sm:col-span-2 lg:col-span-3 rounded-md bg-gray-50 p-3 text-xs text-gray-600">{getModelName(form.modelId)} · {form.color} · Chassi ••••••{form.chassis.slice(-6)}. Os dados são preenchidos pelo cadastro do estoque.</div>}
