@@ -9,6 +9,7 @@ import {
   ClipboardList,
   Users,
   Package,
+  Warehouse,
   Settings,
   Bell,
   Menu,
@@ -43,6 +44,7 @@ const navigation = [
     items: [
       { label: 'Usuários', href: '/usuarios', icon: Users },
       { label: 'Catálogo', href: '/catalogo', icon: Package },
+      { label: 'Estoque de veículos', href: '/estoque', icon: Warehouse },
       { label: 'Configurações', href: '/configuracoes', icon: Settings },
     ],
   },

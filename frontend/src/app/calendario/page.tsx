@@ -63,6 +63,7 @@ interface Appointment {
   customer: string;
   modelId: string;
   year: string;
+  vehicleId?: string;
   color: string;
   chassis: string;
   orderNumber: string;
@@ -84,6 +85,9 @@ interface Appointment {
 const STORAGE_KEY = 'portal-entregas-appointments';
 const CATALOG_KEY = 'portal-entregas-catalog';
 const USERS_KEY = 'portal-entregas-users';
+const STOCK_KEY = 'portal-entregas-stock';
+
+interface StockVehicle { id: string; modelId: string; color: string; chassis: string; inStore: boolean; location: string; active: boolean; }
 
 const statuses: {
   value: DeliveryStatus;
@@ -129,6 +133,7 @@ const emptyForm = {
   customer: '',
   modelId: '',
   year: '',
+  vehicleId: '',
   color: '',
   chassis: '',
   orderNumber: '',
@@ -195,6 +200,7 @@ export default function CalendarPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [stockVehicles, setStockVehicles] = useState<StockVehicle[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const [selectedDate, setSelectedDate] = useState('');
@@ -215,6 +221,7 @@ export default function CalendarPage() {
       const storedAppointments = localStorage.getItem(STORAGE_KEY);
       const storedCatalog = localStorage.getItem(CATALOG_KEY);
       const storedUsers = localStorage.getItem(USERS_KEY);
+      const storedStock = localStorage.getItem(STOCK_KEY);
 
       if (storedAppointments) {
         const parsedAppointments = JSON.parse(storedAppointments) as (Appointment & {
@@ -262,6 +269,7 @@ export default function CalendarPage() {
       if (storedUsers) {
         setUsers(JSON.parse(storedUsers));
       }
+      if (storedStock) setStockVehicles(JSON.parse(storedStock));
     } catch {
       console.error('Não foi possível carregar os dados.');
     } finally {
@@ -366,7 +374,8 @@ export default function CalendarPage() {
       time: appointment.time,
       customer: appointment.customer,
       modelId: appointment.modelId,
-      year: appointment.year,
+      year: appointment.year ?? '',
+      vehicleId: appointment.vehicleId ?? stockVehicles.find((v) => v.chassis === appointment.chassis)?.id ?? '',
       color: appointment.color,
       chassis: appointment.chassis,
       orderNumber: appointment.orderNumber,
@@ -455,11 +464,20 @@ export default function CalendarPage() {
     }));
   }
 
+  function selectStockVehicle(vehicleId: string) {
+    const vehicle = stockVehicles.find((item) => item.id === vehicleId);
+    if (!vehicle) {
+      setForm((current) => ({ ...current, vehicleId: '', modelId: '', color: '', chassis: '' }));
+      return;
+    }
+    setForm((current) => ({ ...current, vehicleId, modelId: vehicle.modelId, color: vehicle.color, chassis: vehicle.chassis, location: vehicle.location }));
+  }
+
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!form.date || !form.time || !form.customer.trim() || !form.modelId) {
-      setError('Preencha cliente, modelo, data e horário.');
+    if (!form.date || !form.time || !form.customer.trim() || !form.vehicleId) {
+      setError('Preencha cliente, veículo, data e horário.');
       return;
     }
 
@@ -482,19 +500,12 @@ export default function CalendarPage() {
 
     const existingVehicleAppointment = appointments.find(
       (appointment) =>
-        appointment.modelId === form.modelId &&
+        (appointment.vehicleId === form.vehicleId || appointment.chassis === form.chassis) &&
         appointment.id !== editingId &&
         appointment.status !== 'ENTREGUE' &&
         appointment.status !== 'CANCELADO',
     );
-
-    // A verificação definitiva de veículo será feita pelo chassi
-    // quando o cadastro de veículos for separado do agendamento.
-    if (
-      existingVehicleAppointment &&
-      form.chassis &&
-      existingVehicleAppointment.chassis === form.chassis
-    ) {
+    if (existingVehicleAppointment) {
       setError('Este veículo já possui uma entrega ativa cadastrada.');
       return;
     }
@@ -519,6 +530,7 @@ export default function CalendarPage() {
             ? {
                 ...appointment,
                 ...form,
+                vehicleId: form.vehicleId,
                 customer: form.customer.trim(),
                 chassis: form.chassis.trim().toUpperCase(),
                 orderNumber: form.orderNumber.trim(),
@@ -530,6 +542,7 @@ export default function CalendarPage() {
       const newAppointment: Appointment = {
         id: crypto.randomUUID(),
         ...form,
+        vehicleId: form.vehicleId,
         customer: form.customer.trim(),
         chassis: form.chassis.trim().toUpperCase(),
         orderNumber: form.orderNumber.trim(),
@@ -801,7 +814,6 @@ export default function CalendarPage() {
 
                     <span className="flex items-center gap-1.5">
                       <Palette size={14} className="text-gray-400" />
-                      {appointment.year || 'Ano não informado'} ·{' '}
                       {appointment.color || 'Cor não informada'}
                     </span>
 
@@ -1075,81 +1087,14 @@ export default function CalendarPage() {
 
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                     <div className="sm:col-span-2 lg:col-span-3">
-                      <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                        Modelo *
-                      </label>
-                      <select
-                        required
-                        value={form.modelId}
-                        onChange={(event) =>
-                          setForm({ ...form, modelId: event.target.value })
-                        }
-                        className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500"
-                      >
-                        <option value="">Selecione um modelo</option>
-                        {vehicles.map((vehicle) => (
-                          <option key={vehicle.id} value={vehicle.id}>
-                            {getModelName(vehicle.id)}
-                          </option>
-                        ))}
+                      <label className="mb-1.5 block text-xs font-medium text-gray-600">Veículo do estoque *</label>
+                      <select required value={form.vehicleId} onChange={(event) => selectStockVehicle(event.target.value)} className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500">
+                        <option value="">Selecione um veículo cadastrado</option>
+                        {stockVehicles.map((vehicle) => <option key={vehicle.id} value={vehicle.id}>{getModelName(vehicle.modelId)} — {vehicle.color} — ••••••{vehicle.chassis.slice(-6)} ({vehicle.inStore ? 'Na loja' : 'Fora da loja'})</option>)}
                       </select>
-
-                      {vehicles.length === 0 && (
-                        <p className="mt-1.5 text-xs text-amber-700">
-                          Cadastre primeiro um modelo ativo no Catálogo.
-                        </p>
-                      )}
+                      {stockVehicles.length === 0 && <p className="mt-1.5 text-xs text-amber-700">Cadastre primeiro os veículos na página Estoque.</p>}
                     </div>
-
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                        Ano fabricação/modelo
-                      </label>
-                      <input
-                        value={form.year}
-                        onChange={(event) =>
-                          setForm({ ...form, year: event.target.value })
-                        }
-                        placeholder="Ex.: 2026/2027"
-                        className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm outline-none focus:border-gray-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                        Cor
-                      </label>
-                      <input
-                        value={form.color}
-                        onChange={(event) =>
-                          setForm({ ...form, color: event.target.value })
-                        }
-                        placeholder="Cor do veículo"
-                        className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm outline-none focus:border-gray-500"
-                      />
-                    </div>
-
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                        Chassi
-                      </label>
-                      <input
-                        maxLength={17}
-                        value={form.chassis}
-                        onChange={(event) =>
-                          setForm({
-                            ...form,
-                            chassis: event.target.value.toUpperCase(),
-                          })
-                        }
-                        placeholder="Chassi do veículo"
-                        className="h-10 w-full rounded-md border border-gray-200 px-3 text-sm uppercase outline-none focus:border-gray-500"
-                      />
-                      <p className="mt-1 text-[11px] text-gray-400">
-                        Na visualização, exibiremos somente os últimos 6
-                        caracteres.
-                      </p>
-                    </div>
+                    {form.vehicleId && <div className="sm:col-span-2 lg:col-span-3 rounded-md bg-gray-50 p-3 text-xs text-gray-600">{getModelName(form.modelId)} · {form.color} · Chassi ••••••{form.chassis.slice(-6)}. Os dados são preenchidos pelo cadastro do estoque.</div>}
                   </div>
                 </section>
 
@@ -1545,7 +1490,6 @@ export default function CalendarPage() {
               <div className="grid gap-4 sm:grid-cols-2">
                 {[
                   ['Número do pedido', selectedAppointment.orderNumber],
-                  ['Ano', selectedAppointment.year],
                   ['Cor', selectedAppointment.color],
                   [
                     'Chassi',
