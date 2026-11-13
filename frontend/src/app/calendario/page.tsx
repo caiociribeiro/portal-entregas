@@ -63,12 +63,13 @@ interface Appointment {
   customer: string;
   modelId: string;
   year: string;
-  vehicleId?: string;
   color: string;
   chassis: string;
   orderNumber: string;
   status: DeliveryStatus;
   location: string;
+  inStore: boolean;
+  locationNotes: string;
   passStatus: string;
   platingType: string;
   plated: boolean;
@@ -85,9 +86,6 @@ interface Appointment {
 const STORAGE_KEY = 'portal-entregas-appointments';
 const CATALOG_KEY = 'portal-entregas-catalog';
 const USERS_KEY = 'portal-entregas-users';
-const STOCK_KEY = 'portal-entregas-stock';
-
-interface StockVehicle { id: string; modelId: string; color: string; chassis: string; inStore: boolean; location: string; active: boolean; }
 
 const statuses: {
   value: DeliveryStatus;
@@ -133,12 +131,13 @@ const emptyForm = {
   customer: '',
   modelId: '',
   year: '',
-  vehicleId: '',
   color: '',
   chassis: '',
   orderNumber: '',
   status: 'PRE_AGENDAMENTO' as DeliveryStatus,
   location: 'Na loja de origem',
+  inStore: true,
+  locationNotes: '',
   passStatus: 'PENDENTE',
   platingType: 'INTERNO',
   plated: false,
@@ -200,7 +199,6 @@ export default function CalendarPage() {
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [catalog, setCatalog] = useState<CatalogItem[]>([]);
   const [users, setUsers] = useState<User[]>([]);
-  const [stockVehicles, setStockVehicles] = useState<StockVehicle[]>([]);
   const [loaded, setLoaded] = useState(false);
 
   const [selectedDate, setSelectedDate] = useState('');
@@ -214,8 +212,6 @@ export default function CalendarPage() {
     useState<Appointment | null>(null);
 
   const [form, setForm] = useState(emptyForm);
-  const [vehicleSearch, setVehicleSearch] = useState('');
-  const [showVehicleResults, setShowVehicleResults] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -223,7 +219,6 @@ export default function CalendarPage() {
       const storedAppointments = localStorage.getItem(STORAGE_KEY);
       const storedCatalog = localStorage.getItem(CATALOG_KEY);
       const storedUsers = localStorage.getItem(USERS_KEY);
-      const storedStock = localStorage.getItem(STOCK_KEY);
 
       if (storedAppointments) {
         const parsedAppointments = JSON.parse(storedAppointments) as (Appointment & {
@@ -235,6 +230,8 @@ export default function CalendarPage() {
         setAppointments(
           parsedAppointments.map((appointment) => ({
             ...appointment,
+            inStore: appointment.inStore ?? appointment.location === 'Na loja de origem',
+            locationNotes: appointment.locationNotes ?? '',
             items: appointment.items ?? [
               ...(appointment.accessoryIds ?? []).map((id) => ({
                 id: `legacy-${id}`,
@@ -271,7 +268,6 @@ export default function CalendarPage() {
       if (storedUsers) {
         setUsers(JSON.parse(storedUsers));
       }
-      if (storedStock) setStockVehicles(JSON.parse(storedStock));
     } catch {
       console.error('Não foi possível carregar os dados.');
     } finally {
@@ -377,12 +373,13 @@ export default function CalendarPage() {
       customer: appointment.customer,
       modelId: appointment.modelId,
       year: appointment.year ?? '',
-      vehicleId: appointment.vehicleId ?? stockVehicles.find((v) => v.chassis === appointment.chassis)?.id ?? '',
       color: appointment.color,
       chassis: appointment.chassis,
       orderNumber: appointment.orderNumber,
       status: appointment.status,
       location: appointment.location,
+      inStore: appointment.inStore ?? appointment.location === 'Na loja de origem',
+      locationNotes: appointment.locationNotes ?? '',
       passStatus: appointment.passStatus,
       platingType: appointment.platingType,
       plated: appointment.plated,
@@ -466,23 +463,11 @@ export default function CalendarPage() {
     }));
   }
 
-  function selectStockVehicle(vehicleId: string) {
-    const vehicle = stockVehicles.find((item) => item.id === vehicleId);
-    if (!vehicle) {
-      setForm((current) => ({ ...current, vehicleId: '', modelId: '', color: '', chassis: '' }));
-      setVehicleSearch('');
-      return;
-    }
-    setForm((current) => ({ ...current, vehicleId, modelId: vehicle.modelId, color: vehicle.color, chassis: vehicle.chassis, location: vehicle.location }));
-    setVehicleSearch(`${getModelName(vehicle.modelId)} — ${vehicle.color} — ••••••${vehicle.chassis.slice(-6)}`);
-    setShowVehicleResults(false);
-  }
-
   function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    if (!form.date || !form.time || !form.customer.trim() || !form.vehicleId) {
-      setError('Preencha cliente, veículo, data e horário.');
+    if (!form.date || !form.time || !form.customer.trim() || !form.modelId || !form.color.trim() || !form.chassis.trim()) {
+      setError('Preencha cliente, modelo, cor, chassi, data e horário.');
       return;
     }
 
@@ -505,7 +490,7 @@ export default function CalendarPage() {
 
     const existingVehicleAppointment = appointments.find(
       (appointment) =>
-        (appointment.vehicleId === form.vehicleId || appointment.chassis === form.chassis) &&
+        appointment.chassis === form.chassis &&
         appointment.id !== editingId &&
         appointment.status !== 'ENTREGUE' &&
         appointment.status !== 'CANCELADO',
@@ -535,8 +520,7 @@ export default function CalendarPage() {
             ? {
                 ...appointment,
                 ...form,
-                vehicleId: form.vehicleId,
-                customer: form.customer.trim(),
+                        customer: form.customer.trim(),
                 chassis: form.chassis.trim().toUpperCase(),
                 orderNumber: form.orderNumber.trim(),
               }
@@ -547,7 +531,6 @@ export default function CalendarPage() {
       const newAppointment: Appointment = {
         id: crypto.randomUUID(),
         ...form,
-        vehicleId: form.vehicleId,
         customer: form.customer.trim(),
         chassis: form.chassis.trim().toUpperCase(),
         orderNumber: form.orderNumber.trim(),
@@ -1091,60 +1074,50 @@ export default function CalendarPage() {
                   </h3>
 
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div className="relative sm:col-span-2 lg:col-span-3">
-                      <label htmlFor="stock-vehicle-search" className="mb-1.5 block text-xs font-medium text-gray-600">Pesquisar veículo por modelo ou chassi *</label>
-                      <input
-                        id="stock-vehicle-search"
-                        type="search"
-                        autoComplete="off"
-                        value={vehicleSearch}
-                        onFocus={() => setShowVehicleResults(true)}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          setVehicleSearch(value);
-                          setShowVehicleResults(true);
-                          if (form.vehicleId) {
-                            setForm((current) => ({ ...current, vehicleId: '', modelId: '', color: '', chassis: '' }));
-                          }
-                        }}
-                        placeholder="Digite o modelo, cor ou chassi (completo ou últimos 6 dígitos)"
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-gray-600">
+                        Modelo e versão *
+                      </label>
+                      <select
+                        value={form.modelId}
+                        onChange={(event) => setForm({ ...form, modelId: event.target.value })}
+                        required
                         className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500"
-                        required={!form.vehicleId}
-                      />
-                      {showVehicleResults && vehicleSearch !== (form.vehicleId ? `${getModelName(form.modelId)} — ${form.color} — ••••••${form.chassis.slice(-6)}` : '') && (
-                        <div className="absolute z-30 mt-1 max-h-64 w-full overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
-                          {stockVehicles.filter((vehicle) => {
-                            const query = vehicleSearch.trim().toLocaleLowerCase();
-                            const chassis = vehicle.chassis.toLocaleLowerCase();
-                            const model = getModelName(vehicle.modelId).toLocaleLowerCase();
-                            return !query || model.includes(query) || vehicle.color.toLocaleLowerCase().includes(query) || chassis.includes(query) || chassis.slice(-6).includes(query.replace(/[^a-z0-9]/g, ''));
-                          }).map((vehicle) => (
-                            <button
-                              key={vehicle.id}
-                              type="button"
-                              onClick={() => selectStockVehicle(vehicle.id)}
-                              className="flex w-full flex-col gap-1 border-b border-gray-100 px-3 py-2.5 text-left last:border-0 hover:bg-gray-50"
-                            >
-                              <span className="text-sm font-medium text-gray-900">{getModelName(vehicle.modelId)} — {vehicle.color}</span>
-                              <span className="text-xs text-gray-500">Chassi ••••••{vehicle.chassis.slice(-6)} · {vehicle.inStore ? 'Na loja' : 'Fora da loja'}</span>
-                            </button>
-                          ))}
-                          {stockVehicles.filter((vehicle) => {
-                            const query = vehicleSearch.trim().toLocaleLowerCase();
-                            const chassis = vehicle.chassis.toLocaleLowerCase();
-                            return !query || getModelName(vehicle.modelId).toLocaleLowerCase().includes(query) || vehicle.color.toLocaleLowerCase().includes(query) || chassis.includes(query) || chassis.slice(-6).includes(query.replace(/[^a-z0-9]/g, ''));
-                          }).length === 0 && <p className="px-3 py-3 text-sm text-gray-500">Nenhum veículo encontrado.</p>}
-                        </div>
-                      )}
-                      {stockVehicles.length === 0 && <p className="mt-1.5 text-xs text-amber-700">Cadastre primeiro os veículos na página Estoque.</p>}
+                      >
+                        <option value="">Selecione o modelo</option>
+                        {vehicles.map((vehicle) => (
+                          <option key={vehicle.id} value={vehicle.id}>
+                            {getModelName(vehicle.id)}
+                          </option>
+                        ))}
+                      </select>
                     </div>
-                    {form.vehicleId && <div className="sm:col-span-2 lg:col-span-3 rounded-md bg-gray-50 p-3 text-xs text-gray-600">{getModelName(form.modelId)} · {form.color} · Chassi ••••••{form.chassis.slice(-6)}. Os dados são preenchidos pelo cadastro do estoque.</div>}
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-gray-600">Cor *</label>
+                      <input
+                        value={form.color}
+                        onChange={(event) => setForm({ ...form, color: event.target.value })}
+                        required
+                        placeholder="Cor do veículo"
+                        className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-gray-600">Chassi *</label>
+                      <input
+                        value={form.chassis}
+                        onChange={(event) => setForm({ ...form, chassis: event.target.value.toUpperCase() })}
+                        required
+                        placeholder="Informe o chassi completo"
+                        className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm uppercase outline-none focus:border-gray-500"
+                      />
+                    </div>
                   </div>
                 </section>
 
                 <div className="border-t border-gray-100" />
 
-                {/* Responsáveis */}
+                                {/* Responsáveis */}
                 <section>
                   <h3 className="mb-4 text-sm font-semibold text-gray-900">
                     Consultores e responsáveis
@@ -1224,6 +1197,52 @@ export default function CalendarPage() {
 
                 <div className="border-t border-gray-100" />
 
+                {/* Localização */}
+                <section>
+                  <h3 className="mb-4 text-sm font-semibold text-gray-900">
+                    Localização
+                  </h3>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <label className="mb-1.5 block text-xs font-medium text-gray-600">
+                        Onde está o veículo?
+                      </label>
+                      <select
+                        value={form.location}
+                        onChange={(event) => setForm({ ...form, location: event.target.value })}
+                        className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500"
+                      >
+                        {locations.map((location) => (
+                          <option key={location} value={location}>{location}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="flex items-center gap-2 pt-7">
+                      <input
+                        id="vehicle-in-store"
+                        type="checkbox"
+                        checked={form.inStore}
+                        onChange={(event) => setForm({ ...form, inStore: event.target.checked })}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                      <label htmlFor="vehicle-in-store" className="text-sm text-gray-700">Veículo está na loja</label>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <label className="mb-1.5 block text-xs font-medium text-gray-600">
+                        Observação
+                      </label>
+                      <input
+                        value={form.locationNotes}
+                        onChange={(event) => setForm({ ...form, locationNotes: event.target.value })}
+                        placeholder="Informações adicionais sobre a localização (opcional)"
+                        className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500"
+                      />
+                    </div>
+                  </div>
+                </section>
+
+                <div className="border-t border-gray-100" />
+
                 {/* Preparação */}
                 <section>
                   <h3 className="mb-4 text-sm font-semibold text-gray-900">
@@ -1231,25 +1250,6 @@ export default function CalendarPage() {
                   </h3>
 
                   <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    <div>
-                      <label className="mb-1.5 block text-xs font-medium text-gray-600">
-                        Localização
-                      </label>
-                      <select
-                        value={form.location}
-                        onChange={(event) =>
-                          setForm({ ...form, location: event.target.value })
-                        }
-                        className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500"
-                      >
-                        {locations.map((location) => (
-                          <option key={location} value={location}>
-                            {location}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
-
                     <div>
                       <label className="mb-1.5 block text-xs font-medium text-gray-600">
                         Situação do passe
@@ -1277,6 +1277,7 @@ export default function CalendarPage() {
                           setForm({
                             ...form,
                             platingType: event.target.value,
+                            ...(event.target.value === 'EXTERNO' ? { plated: false } : {}),
                           })
                         }
                         className="h-10 w-full rounded-md border border-gray-200 bg-white px-3 text-sm outline-none focus:border-gray-500"
@@ -1289,7 +1290,7 @@ export default function CalendarPage() {
 
                   <div className="mt-4 grid gap-3 sm:grid-cols-3">
                     {[
-                      { key: 'plated', label: 'Veículo emplacado' },
+                      ...(form.platingType === 'EXTERNO' ? [] : [{ key: 'plated', label: 'Veículo emplacado' }]),
                       { key: 'washed', label: 'Veículo lavado' },
                       { key: 'reviewed', label: 'Veículo revisado' },
                     ].map((item) => (
@@ -1542,6 +1543,8 @@ export default function CalendarPage() {
                       : 'Não informado',
                   ],
                   ['Localização', selectedAppointment.location],
+                  ['Em loja', (selectedAppointment.inStore ?? selectedAppointment.location === 'Na loja de origem') ? 'Sim' : 'Não'],
+                  ['Observação da localização', selectedAppointment.locationNotes || '—'],
                   ['Passe', selectedAppointment.passStatus],
                   ['Emplacamento', selectedAppointment.platingType],
                   ['Emplacado', selectedAppointment.plated ? 'Sim' : 'Não'],
