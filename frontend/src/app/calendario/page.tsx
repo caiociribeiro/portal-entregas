@@ -568,7 +568,7 @@ export default function CalendarPage() {
 
     if (!model) return 'Modelo não informado';
 
-    return model.name;
+    return model.version ? `${model.name} ${model.version}` : model.name;
   }
 
 

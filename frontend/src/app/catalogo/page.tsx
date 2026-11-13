@@ -401,6 +401,9 @@ export default function CatalogPage() {
                     <td className="px-5 py-4">
                       <p className="text-sm font-medium text-gray-800">
                         {item.name}
+                        {item.category === 'vehicles' && item.version && (
+                          <span className="ml-1 font-normal text-gray-500">{item.version}</span>
+                        )}
                       </p>
                     </td>
 

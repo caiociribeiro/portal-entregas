@@ -180,7 +180,9 @@ export default function Dashboard() {
   );
 
   function modelName(modelId: string) {
-    return catalog.find((item) => item.id === modelId)?.name ?? 'Modelo não informado';
+    const model = catalog.find((item) => item.id === modelId);
+    if (!model) return 'Modelo não informado';
+    return model.version ? `${model.name} ${model.version}` : model.name;
   }
 
   function userName(userId: string) {
